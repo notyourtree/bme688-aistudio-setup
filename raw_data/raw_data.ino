@@ -3,7 +3,7 @@
  * and gas resistence via the serial connection to a python program rawdata.py
  * in order to use in the BME AI Studio.
  * Compared to raw_data_mul, this program sends data from a singke
- * BME688 sensor using I2C communication protocol.
+ * BME688 sensor using I2C or SPI communication protocol.
  * 
  */
 /* Includes */
@@ -55,8 +55,9 @@ Bme68x bme;
  * 
  */
 void setup() {
-  	Serial.begin(115200);
-	while (!Serial) delay(10); // wait for console
+  Serial.begin(115200);
+  Serial.setTimeout(100);
+	while (!Serial) delay(10); // wait for console	
 
 	/* Initialize communcation protocols */
 #ifdef PIN_CS
@@ -68,19 +69,61 @@ void setup() {
 	/* Initialize sensor with i2c and Wire library */
 	bme.begin(BME68X_I2C_ADDR_HIGH, Wire);
 #endif
-  	checkSensorStatus();
+  checkSensorStatus();
 
 	/* Set the default configuration for temperature, pressure and humidity */
 	bme.setTPH();
 	checkSensorStatus();
 
-	/* Heater temperature in degree Celsius */
-	uint16_t tempProf[10] = { 320, 100, 100, 100, 200, 200, 200, 320, 320, 320 };
-	/* Multiplier to the shared heater duration */
-	uint16_t mulProf[10] = { 5, 2, 10, 30, 5, 5, 5, 5, 5, 5 };
-	/* Shared heating duration in milliseconds */
-	uint16_t sharedHeatrDur = MEAS_DUR - (bme.getMeasDur(BME68X_PARALLEL_MODE) / 1000);
+  /* Heater temperature in degree Celsius */
+//   uint16_t tempProf[10] = { 320, 100, 100, 100, 200, 200, 200, 320, 320, 320 }; // automated setting this over serial
+  /* Multiplier to the shared heater duration */
+//   uint16_t mulProf[10] = { 5, 2, 10, 30, 5, 5, 5, 5, 5, 5 }; // automated setting these values over serial
+	/* Shared heating duration in milliseconds. 
+	getMeasDur() returns Measurement duration in micro sec. to convert to milli sec. '/ INT64_C(1000)' */
+	uint16_t sharedHeatrDur = MEAS_DUR - (bme.getMeasDur(BME68X_PARALLEL_MODE) / 1000); 
 
+  /**************** READ SENSOR SETTINGS OVER SERIAL *******************/
+  
+	/* Set sensor configuration over Serial connection from python */
+  while (!Serial.available()); // wait till rawdata.py sends length of heater profile 
+  
+  int profileLen;
+  // want to keep reading from serial until we reach end of heater profile vector
+  if (Serial.available()) {
+    profileLen = Serial.readString().toInt();
+    // using readString instead of parseInt because parseInt leaves 
+    // new line character in input buffer
+  }
+
+  Serial.println(String(profileLen));
+
+  /* Heater temperature in degree Celsius */
+  uint16_t tempProf[profileLen];
+  /* Multiplier to the shared heater duration */
+  uint16_t mulProf[profileLen];
+  
+  String input;
+  
+  for (int i = 0; i < profileLen; i++) {
+    /* Wait for temperature and time vector String from Python */
+    while (!Serial.available());
+    
+    while (Serial.available()) {
+      input = Serial.readString();
+      input.trim();
+      /* Parse vector and save to array */
+      int comma = input.indexOf(",");
+      if (comma > 0) {
+        tempProf[i] = (uint16_t) input.substring(0,comma).toInt();
+        mulProf[i] = (uint16_t) input.substring(comma+1,input.length()).toInt();
+        Serial.println(String(tempProf[i]) + "," + String(mulProf[i]) + "," + String(i));
+      }
+    }
+  }
+
+  /***************** ENDS HERE *****************/
+  
 	/* Set the sensor heater profile for parallel mode */
 	bme.setHeaterProf(tempProf, mulProf, sharedHeatrDur, 10);
 	checkSensorStatus();
